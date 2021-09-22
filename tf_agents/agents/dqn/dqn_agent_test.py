@@ -34,6 +34,7 @@ from tf_agents.trajectories import time_step as ts
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.utils import test_utils
+import numpy as np
 
 
 class DummyNet(network.Network):
@@ -501,6 +502,78 @@ class DqnAgentTest(test_utils.TestCase):
 
     self.evaluate(tf.compat.v1.global_variables_initializer())
     self.assertAllClose(self.evaluate(loss), expected_loss)
+
+  def testRandomActionsUseExplorationMask(self, agent_class):
+    time_step_spec = ts.time_step_spec(self._observation_spec)
+    q_net = DummyNet(self._observation_spec, self._action_spec)
+
+    epsilon = 1.0 # force all actions to be random, none greedy
+
+    # Ensure both actions get used when exploration mask allows both
+    exploration_mask = [1, 1] # both actions are used for exploration
+    agent = agent_class(
+        time_step_spec,
+        self._action_spec,
+        q_network=q_net,
+        optimizer=None,
+        exploration_mask=exploration_mask,
+        epsilon_greedy=epsilon)
+
+    epsilon_greedy_policy = agent.collect_policy
+    observations = tf.constant([[1, 2], [3, 4]], dtype=tf.float32)
+    time_steps = ts.restart(observations, batch_size=2)
+
+    # Get 10 action batchs from the policy and ensure there is variety
+    actions = [epsilon_greedy_policy.action(time_steps).action for _ in range(10)]
+    actions = np.concatenate(self.evaluate(actions))
+    self.assertFalse(all(actions == self._action_spec.minimum))
+
+
+    # Now use the exploration mask to enforce that all actions are action 0
+    exploration_mask = [1, 0] # only action 0 can be used for exploration
+
+    agent = agent_class(
+        time_step_spec,
+        self._action_spec,
+        q_network=q_net,
+        optimizer=None,
+        exploration_mask=exploration_mask,
+        epsilon_greedy=epsilon)
+
+    epsilon_greedy_policy = agent.collect_policy
+    observations = tf.constant([[1, 2], [3, 4]], dtype=tf.float32)
+    time_steps = ts.restart(observations, batch_size=2)
+
+    # Get 10 action batchs from the policy and ensure they are all the same
+    actions = [epsilon_greedy_policy.action(time_steps).action for _ in range(10)]
+    actions = np.concatenate(self.evaluate(actions))
+    self.assertTrue(all(actions == self._action_spec.minimum))
+
+  def testGreedyPolicyIgnoresExplorationMask(self, agent_class):
+    time_step_spec = ts.time_step_spec(self._observation_spec)
+    q_net = DummyNet(self._observation_spec, self._action_spec)
+    exploration_mask = [0, 1] # only action 1 can be used for exploration
+
+    agent = agent_class(
+        time_step_spec,
+        self._action_spec,
+        q_network=q_net,
+        optimizer=None,
+        exploration_mask=exploration_mask,
+        epsilon_greedy=0.5) # 50% chance of random action
+
+    epsilon_greedy_policy = agent.collect_policy
+    observations = tf.constant([[1, 2], [3, 4]], dtype=tf.float32)
+    time_steps = ts.restart(observations, batch_size=2)
+
+    # Get 10 action batchs from the policy.
+    # All random actions should be 1 (self._action_spec.maximum) but greedy
+    # actions should be varied. Ensure the policy takes a mix of both actions
+    # to ensure greedy actions are not limited by the exploration_mask
+    actions = [epsilon_greedy_policy.action(time_steps).action for _ in range(10)]
+    actions = np.concatenate(self.evaluate(actions))
+    self.assertFalse(all(actions == self._action_spec.maximum))
+
 
   def testPolicy(self, agent_class):
     q_net = DummyNet(self._observation_spec, self._action_spec)

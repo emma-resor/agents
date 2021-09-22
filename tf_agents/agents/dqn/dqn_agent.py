@@ -28,7 +28,7 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
-from typing import Optional, Text, cast
+from typing import Optional, Sequence, Text, cast
 
 import gin
 import tensorflow as tf
@@ -101,6 +101,7 @@ class DqnAgent(tf_agent.TFAgent):
       optimizer: types.Optimizer,
       observation_and_action_constraint_splitter: Optional[
           types.Splitter] = None,
+      exploration_mask: Optional[Sequence[int]] = None,
       epsilon_greedy: Optional[types.FloatOrReturningFloat] = 0.1,
       n_step_update: int = 1,
       boltzmann_temperature: Optional[types.FloatOrReturningFloat] = None,
@@ -147,6 +148,8 @@ class DqnAgent(tf_agent.TFAgent):
         called on the observation before passing to the network.
         If `observation_and_action_constraint_splitter` is None, action
         constraints are not applied.
+      exploration_mask: A `[0, 1]` vector describing which actions should be in
+        the set of exploratory actions. Passed to DqnAgent initializer.
       epsilon_greedy: probability of choosing a random action in the default
         epsilon-greedy collect policy (used only if a wrapper is not provided to
         the collect_policy method). Only one of epsilon_greedy and
@@ -243,6 +246,7 @@ class DqnAgent(tf_agent.TFAgent):
     self._check_network_output(self._q_network, 'q_network')
     self._check_network_output(self._target_q_network, 'target_q_network')
 
+    self._exploration_mask = exploration_mask
     self._epsilon_greedy = epsilon_greedy
     self._n_step_update = n_step_update
     self._boltzmann_temperature = boltzmann_temperature
@@ -340,7 +344,8 @@ class DqnAgent(tf_agent.TFAgent):
           policy, temperature=self._boltzmann_temperature)
     else:
       collect_policy = epsilon_greedy_policy.EpsilonGreedyPolicy(
-          policy, epsilon=self._epsilon_greedy)
+          policy, epsilon=self._epsilon_greedy,
+          exploration_mask=self._exploration_mask)
     policy = greedy_policy.GreedyPolicy(policy)
 
     # Create self._target_greedy_policy in order to compute target Q-values.
